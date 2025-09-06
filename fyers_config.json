@@ -1,0 +1,8 @@
+{
+    "app_id": "7F5N2PZTS2-100",
+    "secret_key": "AS5ONKXGQ8",
+    "redirect_uri": "http://localhost/",
+    "username": "XJ10358",
+    "totp_secret": "SKF54EJGEWCQHITD76AVUSGXQ6SUDAJC",
+    "pin": "3551"
+}
