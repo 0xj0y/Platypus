@@ -1,0 +1,155 @@
+# =======================
+# FYERS API & CREDENTIALS
+# =======================
+# Never commit API credentials or tokens
+fyers_config.json
+access_token.json
+*.env
+.env
+*.key
+*.secret
+
+# =======================
+# STOCK DATA FILES
+# =======================
+# Individual stock data files (can be very large)
+stock_data/
+*.csv
+master_historical_*.csv
+*_historical_1d.csv
+file_index_*.csv
+failed_stocks.csv
+
+# Temporary data files
+temp_data/
+data_temp/
+*.tmp
+
+# =======================
+# PYTHON SPECIFIC
+# =======================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env/
+.venv/
+Scripts/
+pyvenv.cfg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# =======================
+# IDE & EDITORS
+# =======================
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+
+# Emacs
+*~
+
+# =======================
+# OPERATING SYSTEM
+# =======================
+# Windows
+Thumbs.db
+*.db
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# =======================
+# PROJECT SPECIFIC
+# =======================
+# Log files
+*.log
+logs/
+debug.log
+error.log
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# ML model files (if they get large)
+models/
+*.pkl
+*.joblib
+*.h5
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Cache directories
+.cache/
+cache/
