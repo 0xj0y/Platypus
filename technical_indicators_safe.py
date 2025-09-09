@@ -157,6 +157,43 @@ class TechnicalIndicators:
         return atr
     
     @staticmethod
+    def normalized_ATR(df,period=14):
+        """Normalized atr to provide more details about volatility
+        """
+        if len(df) < period:
+            return pd.Series(np.nan, index=df.index)
+        atr = TechnicalIndicators.calculate_ATR(df,period)
+        normalized_atr = atr/df['close']
+        return normalized_atr
+
+    @staticmethod
+    def rolling_stdev(df, period=20):
+        """calculate rolling standard deviation to detrmine volatility"""
+        df['returns'] = df['close'].pct_change()
+        volatility_20d = df['returns'].rolling(period).std()
+        return volatility_20d
+    
+    @staticmethod
+    def volume_features(df, period=20):
+        """
+        Add normalized volume features to handle growth and splits
+        """
+        # 20-day volume moving average
+        df['volume_ma_20'] = df['volume'].rolling(window=period).mean()
+        
+        # Volume ratio (current volume / 20-day average)
+        df['volume_ratio'] = df['volume'] / df['volume_ma_20']
+        
+        # Volume percentile over last 252 days (1 year)
+        df['volume_percentile'] = df['volume'].rolling(window=252, min_periods=20).rank(pct=True)
+        
+        # Volume spike detection (volume > 2x average)
+        df['volume_spike'] = (df['volume_ratio'] > 2.0).astype(int)
+        
+        return df
+
+    
+    @staticmethod
     def add_all_indicators(df):
         """Add all technical indicators to DataFrame"""
         if len(df) == 0:
@@ -177,7 +214,12 @@ class TechnicalIndicators:
             
             # ATR (14-period)
             df_enhanced['ATR_14'] = TechnicalIndicators.calculate_ATR(df_enhanced, 14)
-            
+            #rolling stdev 20 period
+            df_enhanced['VOL_20'] = TechnicalIndicators.rolling_stdev(df_enhanced,20)
+            #normalized atr
+            df_enhanced['NORM_ATR'] = TechnicalIndicators.normalized_ATR(df_enhanced,14)
+            #add volume features
+            df_enhanced = TechnicalIndicators.volume_features(df_enhanced, 20)
         except Exception as e:
             print(f"⚠️  Error adding indicators: {str(e)}")
             return df
