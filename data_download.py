@@ -32,7 +32,7 @@ class BulkDataDownloader:
     def generate_standard_filename(self, raw_symbol):
         """Generate standardized filename using ONLY the raw symbol from CSV"""
         # Clean the raw symbol only - remove special chars, keep alphanumeric
-        cleaned_symbol = re.sub(r'[^A-Za-z0-9]', '_', raw_symbol.strip())
+        cleaned_symbol = re.sub(r'[^A-Za-z0-9&-]', '_', raw_symbol.strip())
         # Convert to uppercase and add standard suffix
         return f"{cleaned_symbol.upper()}_historical_1d.csv"
     
@@ -257,7 +257,7 @@ class BulkDataDownloader:
             else:
                 print("❌ Failed")
             
-            time.sleep(1.5)  # Rate limiting
+            #time.sleep(1.5)  # Rate limiting
         
         if all_candles:
             # Convert to DataFrame
@@ -339,7 +339,7 @@ class BulkDataDownloader:
                     print(f"   ❌ Failed: {len(self.failed_stocks)}")
                     print(f"   📊 Success rate: {(len(self.success_stocks) + len(self.skipped_stocks))/(i+1)*100:.1f}%")
                     print("   ⏸️  Rate limit pause (5 seconds)...")
-                    #time.sleep(1)
+                    #time.sleep(5)
                 
             except Exception as e:
                 print(f"   ❌ Exception for {raw_symbol}: {str(e)}")
