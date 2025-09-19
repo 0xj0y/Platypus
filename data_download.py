@@ -11,6 +11,8 @@ import re
 import pytz
 from datetime import datetime, timedelta
 from fyers_semi_auto_login import FyersAutoLogin
+import time
+import sys
 
 
 class BulkDataDownloader:
@@ -131,6 +133,7 @@ class BulkDataDownloader:
                 "symbol": symbol, "resolution": "D", "date_format": "1",
                 "range_from": start_date, "range_to": end_date, "cont_flag": "1"
             })
+            #time.sleep()
             if response["s"] == "ok":
                 return response["candles"]
             print(f"   ⚠️ API error: {response.get('message')}")
@@ -169,17 +172,35 @@ class BulkDataDownloader:
             print(f"   📥 Full download from {actual_start_date.date()}")
 
         date_ranges = self.generate_date_ranges(actual_start_date, max_end_date)
+
         all_candles = []
 
-        print(f"   📅 Will download {len(date_ranges)} ranges up to {max_download_date}")
-        for i, dr in enumerate(date_ranges):
-            print(f"   📈 Range {i+1}/{len(date_ranges)}: {dr['start']} → {dr['end']}", end=" ")
-            candles = self.download_single_range(formatted_symbol, dr["start"], dr["end"])
+        # If start and end date is equal
+        if actual_start_date==max_end_date:
+            #sys.exit()
+            print(f"   📅 Will download letes eod data for date: {max_end_date}")
+            candles = self.download_single_range(formatted_symbol, 
+                                                 start_date=actual_start_date.strftime("%Y-%m-%d"), 
+                                                 end_date=max_end_date.strftime("%Y-%m-%d"))
+
             if candles:
-                all_candles.extend(candles)
-                print(f"✅ {len(candles)} days")
+                all_candles = candles  # Assign (not extend) for single day
+                print(f"✅ Got {len(candles)} records")
             else:
-                print("❌ Failed")
+                print("❌ No data retrieved")
+                return "failed"
+        else:
+            print(f"   📅 Will download {len(date_ranges)} ranges up to {max_download_date}")
+
+            for i, dr in enumerate(date_ranges):
+                print(f"   📈 Range {i+1}/{len(date_ranges)}: {dr['start']} → {dr['end']}", end=" ")
+                candles = self.download_single_range(formatted_symbol, dr["start"], dr["end"])
+
+                if candles:
+                    all_candles.extend(candles)
+                    print(f"✅ {len(candles)} days")
+                else:
+                    print("❌ Failed")
 
         if not all_candles:
             print("   ❌ No data retrieved")
@@ -228,6 +249,7 @@ class BulkDataDownloader:
             print(f"\n📈 [{i+1}/{len(stock_list)}] {raw_symbol}")
             try:
                 result = self.download_stock_data(raw_symbol, start_year)
+                #time.sleep(5)
                 if result == "success":
                     filename = self.generate_standard_filename(raw_symbol)
                     self.success_stocks.append((raw_symbol, filename))
@@ -243,6 +265,7 @@ class BulkDataDownloader:
             if (i + 1) % batch_size == 0:
                 print(f"\n🔄 Batch checkpoint ({i+1}/{len(stock_list)})")
                 print(f"   ✅ New: {len(self.success_stocks)} | 🔄 Resumed: {len(self.resumed_stocks)} | ⏭️ Skipped: {len(self.skipped_stocks)} | ❌ Failed: {len(self.failed_stocks)}")
+                #time.sleep(2)
 
         self.create_file_index()
         self.create_master_file(start_year, max_download_date)
@@ -324,9 +347,9 @@ def start_standardized_bulk_download():
 
 if __name__ == "__main__":
     print("🚀 Starting Standardized Bulk Data Download...")
-    #start_standardized_bulk_download()
+    start_standardized_bulk_download()
 
-    downloader = BulkDataDownloader()
+    ''' downloader = BulkDataDownloader()
     if downloader.initialize_client():
         result = downloader.download_stock_data("CEMPRO",required_start_year=2010)
-        print(result)
+        print(result)'''
