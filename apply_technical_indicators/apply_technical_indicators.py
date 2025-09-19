@@ -12,11 +12,12 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-
+raw_data_dir = 'stock_data'
+analysis_base_dir = 'analysis_data/'
 class SafeDataManager:
     """Manages safe copying and analysis of stock data"""
     
-    def __init__(self, raw_data_dir='stock_data', analysis_base_dir='analysis_data'):
+    def __init__(self, raw_data_dir=raw_data_dir, analysis_base_dir=analysis_base_dir):
         self.raw_data_dir = raw_data_dir
         self.analysis_base_dir = analysis_base_dir
     
@@ -191,6 +192,63 @@ class TechnicalIndicators:
         df['volume_spike'] = (df['volume_ratio'] > 2.0).astype(int)
         
         return df
+    
+    @staticmethod
+    def calculate_darvas_box(df, boxp=5):
+        """
+        Calculate Darvas Box high/low and breakout signals.
+        Logic adapted from PineScript.
+        
+        Args:
+            df (pd.DataFrame): Must contain 'high','low','close'
+            boxp (int): Lookback length (default=5)
+        
+        Returns:
+            pd.DataFrame: df with darvas_high, darvas_low, darvas_breakout_up
+        """
+        df = df.copy()
+
+        # rolling highs and lows
+        LL = df['low'].rolling(window=boxp).min()
+        k1 = df['high'].rolling(window=boxp).max()
+        k2 = df['high'].rolling(window=boxp-1).max()
+        k3 = df['high'].rolling(window=boxp-2).max()
+
+        # box condition
+        box1 = k3 < k2
+        cond_newhigh = df['high'] > k1.shift(1)
+
+        NH = np.where(cond_newhigh, df['high'], np.nan)
+        NH = pd.Series(NH).ffill().values
+
+        barssince = (~cond_newhigh).groupby(cond_newhigh.cumsum()).cumcount()
+
+        darvas_high = np.where((barssince == (boxp - 2)) & (box1), NH, np.nan)
+        darvas_high = pd.Series(darvas_high).ffill().values
+
+        darvas_low = np.where((barssince == (boxp - 2)) & (box1), LL, np.nan)
+        darvas_low = pd.Series(darvas_low).ffill().values
+
+        # breakout: only mark first breakout after box
+        darvas_breakout_up = [0] * len(df)
+        breakout_done = False
+        for i in range(1, len(df)):
+            if np.isnan(darvas_high[i]) or np.isnan(darvas_high[i - 1]):
+                continue
+            if not breakout_done and df['close'].iat[i] > darvas_high[i - 1]:
+                darvas_breakout_up[i] = 1
+                breakout_done = True
+            if darvas_high[i] != darvas_high[i - 1]:
+                breakout_done = False
+
+        df['darvas_high'] = darvas_high
+        df['darvas_low'] = darvas_low
+        df['darvas_breakout_up'] = darvas_breakout_up
+        # Clean up helper columns
+        df.drop(columns=['LL', 'k1', 'k2', 'k3', 'box1', 'NH', 'barssince'], inplace=True, errors='ignore')
+        return df
+
+
 
     
     @staticmethod
@@ -220,6 +278,12 @@ class TechnicalIndicators:
             df_enhanced['NORM_ATR'] = TechnicalIndicators.normalized_ATR(df_enhanced,14)
             #add volume features
             df_enhanced = TechnicalIndicators.volume_features(df_enhanced, 20)
+            
+            #add darvas box and breakouts
+            df_enhanced = TechnicalIndicators.calculate_darvas_box(df_enhanced, boxp=5)
+            df_enhanced["ema_9_21_diff"] = (df_enhanced["EMA_9"] - df_enhanced["EMA_21"]) / df_enhanced["close"]
+            df_enhanced["ema_50_200_diff"] = (df_enhanced["EMA_50"] - df_enhanced["EMA_200"]) / df_enhanced["close"]
+        
         except Exception as e:
             print(f"⚠️  Error adding indicators: {str(e)}")
             return df
@@ -343,7 +407,7 @@ class AnalysisProcessor:
         return master_path
 
 # Easy-to-use workflow functions
-def create_analysis_with_indicators(analysis_name=None, raw_data_dir='stock_data'):
+def create_analysis_with_indicators(analysis_name=None, raw_data_dir=raw_data_dir):
     """Complete workflow: copy raw data + add indicators + create master file"""
     print("🚀 Starting complete safe analysis workflow...")
     print("🔒 Your raw data will remain untouched")
@@ -400,7 +464,7 @@ def load_analysis_stock(stock_symbol, analysis_version=None):
             return None
         analysis_version = versions[-1]  # Use latest
     
-    analysis_dir = os.path.join('analysis_data', analysis_version)
+    analysis_dir = os.path.join(analysis_base_dir, analysis_version)
     file_pattern = f"{stock_symbol.upper()}_historical_1d.csv"
     file_path = os.path.join(analysis_dir, file_pattern)
     
