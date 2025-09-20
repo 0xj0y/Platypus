@@ -135,7 +135,19 @@ class TechnicalIndicators:
         rs = gain / loss.replace(0, np.nan)
         rsi = 100 - (100 / (1 + rs))
         return rsi
-    
+    @staticmethod
+    def calculate_BB(df, period=20,std_dev=2, column='close'):
+        """Calculate Bollinger Bands components"""
+        if len(df) < period:
+            return pd.Series(np.nan, index=df.index)
+        
+        df['BB_Middle'] = df[column].rolling(window=period).mean()
+        df['BB_Std'] = df[column].rolling(window=period).std()
+        df['BB_Upper'] = df['BB_Middle'] + (std_dev * df['BB_Std'])
+        df['BB_Lower'] = df['BB_Middle'] - (std_dev * df['BB_Std'])
+        df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
+        return df
+
     @staticmethod
     def calculate_EMA(df, period, column='close'):
         """Calculate Exponential Moving Average"""
@@ -283,6 +295,13 @@ class TechnicalIndicators:
             df_enhanced = TechnicalIndicators.calculate_darvas_box(df_enhanced, boxp=5)
             df_enhanced["ema_9_21_diff"] = (df_enhanced["EMA_9"] - df_enhanced["EMA_21"]) / df_enhanced["close"]
             df_enhanced["ema_50_200_diff"] = (df_enhanced["EMA_50"] - df_enhanced["EMA_200"]) / df_enhanced["close"]
+
+            # Bollinger Bands (20,2)
+            df_enhanced = TechnicalIndicators.calculate_BB(df_enhanced, period=20, std_dev=2)
+
+            df_enhanced['NORM_BB'] = (df_enhanced['close'] - df_enhanced['BB_Lower'])/(df_enhanced['BB_Upper'] - df_enhanced['BB_Lower'])
+            df_enhanced['BB_Squeeze'] = (df_enhanced['BB_Width'] < df_enhanced['BB_Width'].rolling(20).mean() * 0.8).astype(int)
+
         
         except Exception as e:
             print(f"⚠️  Error adding indicators: {str(e)}")
