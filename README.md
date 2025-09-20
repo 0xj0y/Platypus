@@ -1,4 +1,4 @@
-# Hybrid Momentum & Mean-Reversion ML Trading Bot
+# Hybrid Momentum & Mean-Reversion ML Model For Portfolio prediction
 
 This repository contains the code for a sophisticated swing trading backtesting engine. The system uses a `CatBoostClassifier` to identify and execute trades, and has demonstrated the ability to function as a hybrid model, successfully capitalizing on both momentum and mean-reversion opportunities.
 
