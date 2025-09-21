@@ -292,7 +292,7 @@ class TechnicalIndicators:
             df_enhanced = TechnicalIndicators.volume_features(df_enhanced, 20)
             
             #add darvas box and breakouts
-            df_enhanced = TechnicalIndicators.calculate_darvas_box(df_enhanced, boxp=5)
+            df_enhanced = TechnicalIndicators.calculate_darvas_box(df_enhanced, boxp=20)
             df_enhanced["ema_9_21_diff"] = (df_enhanced["EMA_9"] - df_enhanced["EMA_21"]) / df_enhanced["close"]
             df_enhanced["ema_50_200_diff"] = (df_enhanced["EMA_50"] - df_enhanced["EMA_200"]) / df_enhanced["close"]
 
@@ -452,12 +452,12 @@ def create_analysis_with_indicators(analysis_name=None, raw_data_dir=raw_data_di
         
         # Step 3: Create master file
         print(f"\n📊 Creating master file...")
-        master_file = processor.create_master_file()
+        #master_file = processor.create_master_file()
         
         print(f"\n🎉 Complete analysis ready!")
         print(f"📂 Analysis directory: {analysis_dir}")
-        if master_file:
-            print(f"📊 Master file: {os.path.basename(master_file)}")
+        #if master_file:
+        #    print(f"📊 Master file: {os.path.basename(master_file)}")
         
     except Exception as e:
         print(f"❌ Error during processing: {str(e)}")

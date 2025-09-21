@@ -37,7 +37,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="catboost")
 plt.rcParams["figure.figsize"] = (10, 5)
 
 RESULTS_DIR = "results"
-PLOTS_DIR = "plots/catboost/v3"
+PLOTS_DIR = "plots/catboost/v13"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
@@ -352,7 +352,7 @@ def engineer_features_and_labels(df, horizon=20):
     features = [
         "RSI_14", "VOL_20", "NORM_ATR", "volume_ratio",
         "darvas_high", "darvas_low", #"darvas_breakout_up",
-        "ema_9_21_diff", "ema_50_200_diff",
+        "ema_9_21_diff", "ema_50_200_diff", "NORM_BB"
     ]
     
     df_labeled.dropna(subset=features + ["target"], inplace=True)
@@ -374,7 +374,10 @@ def run_backtest(folder,
                 require_flat_before_new=True,
                 portfolio_increase_threshold=0.2,
                 allocation_increment=0.15,
-                trailing_sl_after_t3=False):
+                trailing_sl_after_t3=False,
+                activate_drawdown_scaling=True,
+                position_scaling_increment=400000,
+                max_positions_limit=10):
 
     master = create_master_dataframe(folder, start_date)
     df, features = engineer_features_and_labels(master, horizon=horizon)
@@ -392,7 +395,10 @@ def run_backtest(folder,
         require_flat_before_new=require_flat_before_new,
         portfolio_increase_threshold=portfolio_increase_threshold,
         allocation_increment=allocation_increment,
-        trailing_sl_after_t3=trailing_sl_after_t3
+        trailing_sl_after_t3=trailing_sl_after_t3,
+        activate_drawdown_scaling=activate_drawdown_scaling,
+        position_scaling_increment=position_scaling_increment,
+        max_positions_limit=max_positions_limit
     )
 
     model = None
@@ -728,7 +734,7 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
 # -------------------------
 if __name__ == "__main__":
     # config
-    analysis_folder = "analysis_data/ml_v1"
+    analysis_folder = "analysis_data/darvas_5"
     prob_threshold = 0.35
     retrain_freq_days = 20
     train_window_days = 260
@@ -745,9 +751,12 @@ if __name__ == "__main__":
 
     # Trailing stop-loss parameter
     trailing_sl_after_t3 = True  # Set to False for original behavior, stopping all at t3, keep true to ride trend till end
-
-    #choice = input("1 for backtest, 2 for forward pick.\nYour choice: ")
+    activate_drawdown_scaling = False  # Set to False to disable drawdown controls
     
+    # Position size tuning
+    position_scaling_increment = 40000000  # $400k growth → +1 position
+    max_positions_limit = 10             # Hard cap to prevent over-diversification
+     
     if sys.argv[1] == "1":
         # orrect unpacking to handle all 8 returned values
         trades_df, hist_df, training_df, model, explainer, features, df, master_df = run_backtest(
@@ -764,7 +773,10 @@ if __name__ == "__main__":
             require_flat_before_new=require_flat_before_new,
             portfolio_increase_threshold=portfolio_increase_threshold,
             allocation_increment=allocation_increment,
-            trailing_sl_after_t3=trailing_sl_after_t3
+            trailing_sl_after_t3=trailing_sl_after_t3,
+            activate_drawdown_scaling=activate_drawdown_scaling,
+            position_scaling_increment=position_scaling_increment,
+            max_positions_limit=max_positions_limit
         )
 
         plot_and_report(trades_df, hist_df, training_df, model, explainer, features, df, master_df, trailing_sl_after_t3, out_dir=PLOTS_DIR)
@@ -813,7 +825,7 @@ if __name__ == "__main__":
                     print(f"   Average Win: {win_trades['pnl'].mean():,.2f}")
 
     if sys.argv[1] == "2":
-        master_df = create_master_dataframe("analysis_data/ml_v1","2019-01-01")
+        master_df = create_master_dataframe("analysis_data/darvas_5","2019-01-01")
         picks = forward_pick(master_df=master_df, prob_threshold=0.1, max_positions=2, horizon=20)
         if not picks.empty:
             print(picks)
