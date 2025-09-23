@@ -281,7 +281,8 @@ class SwingPortfolioManager:
             self.positions.pop(symbol, None)
 
     # ----------------- Daily Portfolio Management -----------------
-    def manage_day(self, date, today_rows_dict, predictions, prob_threshold=0.55):
+    def manage_day(self, date, today_rows_dict, predictions, prob_threshold=0.55, blacklisted_symbols=None):
+
         """Manage existing positions (partial exits & trailing) and open new ones."""
         
         self._check_and_update_position_count()
@@ -405,7 +406,8 @@ class SwingPortfolioManager:
                 break
             if symbol in self.positions:
                 continue
-
+            if blacklisted_symbols and symbol in blacklisted_symbols:
+                continue
             capital_per_slot = self.balance / open_slots if open_slots > 0 else 0
             bought = self._buy(date, symbol, today_rows_dict[symbol], capital_per_slot)
             if bought:

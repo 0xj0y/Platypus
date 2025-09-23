@@ -37,9 +37,21 @@ warnings.filterwarnings("ignore", category=UserWarning, module="catboost")
 plt.rcParams["figure.figsize"] = (10, 5)
 
 RESULTS_DIR = "results"
-PLOTS_DIR = "plots/catboost/v13"
+PLOTS_DIR = "plots/catboost/v2"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(PLOTS_DIR, exist_ok=True)
+
+# BLACKLIST - Corporate Misgovernance Stocks
+# Keep in training for model learning, exclude from actual trading
+BLACKLISTED_SYMBOLS = {
+    "NSE:PAISALO-EQ",
+    "NSE:PCJEWELLER-EQ",
+    "NSE:IDEA-EQ",
+    }
+print(f"📵 BLACKLISTED STOCKS: {len(BLACKLISTED_SYMBOLS)}")
+for symbol in BLACKLISTED_SYMBOLS:
+    print(f"   • {symbol}")
+print(f"   (Kept in training, excluded from trading)")
 
 # -------------------------
 # Helper: label target with SL/TP-first logic
@@ -195,7 +207,7 @@ def create_sl_loss_report(trades_df, master_df=None):
 
 
 # -------------------------
-# ENHANCED: Winning Trades Report Function with Extended Metrics
+# Winning Trades Report Function with Extended Metrics
 # -------------------------
 def create_win_report(trades_df, master_df=None):
     """
@@ -309,12 +321,73 @@ def create_win_report(trades_df, master_df=None):
 
     return report
 
-
-
-
 # -------------------------
-# Portfolio Manager with Partial Exits + Trailing + DYNAMIC ALLOCATION + NEW TRAILING SL
+# Entry report with date, featurs and prob
 # -------------------------
+
+def create_entry_signals_report(trades_df, df, features):
+    """
+    Create a report showing entry signals with feature values and probabilities.
+    
+    Parameters:
+    trades_df: DataFrame with trade data
+    df: DataFrame with processed data including features and model predictions  
+    features: List of feature column names
+    
+    Returns:
+    DataFrame with entry signals, feature values, and probabilities
+    """
+    
+    # Get all BUY entries
+    buy_entries = trades_df[trades_df['action'] == 'BUY'].copy()
+    
+    if buy_entries.empty:
+        print("No BUY entries found.")
+        return pd.DataFrame()
+    
+    # Convert dates to datetime
+    buy_entries['date'] = pd.to_datetime(buy_entries['date'])
+    df_copy = df.copy()
+    df_copy['date'] = pd.to_datetime(df_copy['date'])
+    
+    # Create the entry report
+    entry_report = []
+    
+    for _, entry in buy_entries.iterrows():
+        # Find matching row in df for this entry
+        matching_row = df_copy[
+            (df_copy['symbol'] == entry['symbol']) & 
+            (df_copy['date'] == entry['date'])
+        ]
+        
+        if not matching_row.empty:
+            row = matching_row.iloc[0]
+            
+            # Create entry record
+            entry_record = {
+                'entry_date': entry['date'],
+                'symbol': entry['symbol'],
+                'entry_price': entry['entry_price'],
+                'shares': entry['shares'],
+                'investment_amount': entry['entry_price'] * entry['shares'],
+                'probability': getattr(row, 'probability', None),
+                'darvas_breakout_up': getattr(row, 'darvas_breakout_up', None),
+            }
+            
+            # Add all feature values
+            for feature in features:
+                entry_record[f'feature_{feature}'] = getattr(row, feature, None)
+            
+            entry_report.append(entry_record)
+    
+    entry_df = pd.DataFrame(entry_report)
+    
+    if not entry_df.empty:
+        # Sort by date
+        entry_df = entry_df.sort_values('entry_date').reset_index(drop=True)
+    
+    return entry_df
+
 
 # -------------------------
 # Data + Features
@@ -345,14 +418,19 @@ def engineer_features_and_labels(df, horizon=20):
     df = df.copy()
     #df["ema_9_21_diff"] = (df["EMA_9"] - df["EMA_21"]) / df["close"]
     #df["ema_50_200_diff"] = (df["EMA_50"] - df["EMA_200"]) / df["close"]
-
+    df["darvas_high_normalized"] = df["darvas_high"]/df["close"]
+    df["darvas_low_normalized"] = df["darvas_low"]/df["close"]
+    df['KC_Pos'] = (df['close'] - df['KC_Lower']) / (df['KC_Upper'] - df['KC_Lower'])
+    df['KC_Width'] = (df['KC_Upper'] - df['KC_Lower']) / df['KC_Mid'] 
     
     df_labeled = label_with_atr_first_touch(df, horizon=horizon, atr_col="ATR_14")
     
     features = [
         "RSI_14", "VOL_20", "NORM_ATR", "volume_ratio",
-        "darvas_high", "darvas_low", #"darvas_breakout_up",
-        "ema_9_21_diff", "ema_50_200_diff", "NORM_BB"
+        "darvas_high_normalized", "darvas_low_normalized", #"darvas_breakout_up",
+        "ema_9_21_diff", "ema_50_200_diff", "NORM_BB",#"BB_Squeeze",
+        #"KC_Pos","KC_Width",
+        #"CMF",
     ]
     
     df_labeled.dropna(subset=features + ["target"], inplace=True)
@@ -381,6 +459,8 @@ def run_backtest(folder,
 
     master = create_master_dataframe(folder, start_date)
     df, features = engineer_features_and_labels(master, horizon=horizon)
+    
+    #df['probability'] = np.nan  
     unique_days = sorted(df["date"].unique())
     
     if not unique_days:
@@ -465,8 +545,10 @@ def run_backtest(folder,
             continue
 
         probs = model.predict_proba(today_df[features])[:, 1]
+
+
         preds = pd.Series(probs, index=today_df["symbol"].values)
-        pm.manage_day(current_date, today_rows, preds, prob_threshold=prob_threshold)
+        pm.manage_day(current_date, today_rows, preds, prob_threshold=prob_threshold, blacklisted_symbols=BLACKLISTED_SYMBOLS)
 
     trades_df, hist_df = pm.export_results(out_dir=RESULTS_DIR)
     training_df = pd.DataFrame(training_log)
@@ -719,7 +801,38 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
     else:
         print("⚠️ SHAP explainer not available - skipping feature importance plots")
 
-    # --- rest unchanged (trailing SL, allocation, training metrics, feature importance, SHAP) ---
+    # NEW: Entry Signals Report
+    print("📋 Generating Entry Signals Report...")
+    entry_report = create_entry_signals_report(trades_df, df, features)
+    
+    if not entry_report.empty:
+        entry_report.to_csv(os.path.join(out_dir, "entry_signals_report.csv"), index=False)
+        print(f"✅ Entry Signals Report saved: {len(entry_report)} entry signals found")
+        
+        # Summary statistics for entry signals
+        print(f"\n📊 ENTRY SIGNALS SUMMARY:")
+        print(f"{'='*50}")
+        print(f"Total entries: {len(entry_report)}")
+        
+        if 'probability' in entry_report.columns and entry_report['probability'].notna().any():
+            avg_prob = entry_report['probability'].mean()
+            min_prob = entry_report['probability'].min() 
+            max_prob = entry_report['probability'].max()
+            print(f"Average probability: {avg_prob:.3f}")
+            print(f"Probability range: {min_prob:.3f} - {max_prob:.3f}")
+        
+        # Feature value distributions for entries
+        feature_cols = [col for col in entry_report.columns if col.startswith('feature_')]
+        if feature_cols:
+            print(f"\nFeature values at entry (averages):")
+            for col in feature_cols:
+                feature_name = col.replace('feature_', '')
+                avg_val = entry_report[col].mean()
+                print(f"{feature_name}: {avg_val:.4f}")
+    else:
+        print("ℹ️ No entry signals found for report")
+
+
 
     # save CSVs
     trades_df.to_csv(os.path.join(out_dir, "trades.csv"), index=False)
@@ -735,9 +848,9 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
 if __name__ == "__main__":
     # config
     analysis_folder = "analysis_data/darvas_5"
-    prob_threshold = 0.35
+    prob_threshold = 0.1
     retrain_freq_days = 20
-    train_window_days = 260
+    train_window_days = 130
     val_window_days = 60
     horizon = 20
     initial_balance = 100000

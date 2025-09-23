@@ -260,6 +260,49 @@ class TechnicalIndicators:
         df.drop(columns=['LL', 'k1', 'k2', 'k3', 'box1', 'NH', 'barssince'], inplace=True, errors='ignore')
         return df
 
+    @staticmethod
+    def calculate_KeltnerChannels(df, ema_period=20, atr_period=10, atr_mult=2):
+        """
+        Calculate Keltner Channels (EMA + ATR bands)
+        """
+        if len(df) < max(ema_period, atr_period):
+            return df
+
+        # Middle line (EMA of close)
+        df['KC_Mid'] = df['close'].ewm(span=ema_period, adjust=False).mean()
+
+        # True Range components
+        high_low = df['high'] - df['low']
+        high_close = (df['high'] - df['close'].shift()).abs()
+        low_close = (df['low'] - df['close'].shift()).abs()
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+
+        # ATR
+        atr = tr.rolling(window=atr_period).mean()
+
+        # Upper & Lower channels
+        df['KC_Upper'] = df['KC_Mid'] + atr_mult * atr
+        df['KC_Lower'] = df['KC_Mid'] - atr_mult * atr
+
+        return df
+
+    @staticmethod
+    def calculate_CMF(df, period=20):
+        """
+        Calculate Chaikin Money Flow (CMF)
+        """
+        if len(df) < period:
+            df['CMF'] = np.nan
+            return df
+
+        mfm = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'])
+        mfv = mfm * df['volume']
+
+        cmf = mfv.rolling(window=period).sum() / df['volume'].rolling(window=period).sum()
+        df['CMF'] = cmf
+
+        return df
+
 
 
     
@@ -301,6 +344,12 @@ class TechnicalIndicators:
 
             df_enhanced['NORM_BB'] = (df_enhanced['close'] - df_enhanced['BB_Lower'])/(df_enhanced['BB_Upper'] - df_enhanced['BB_Lower'])
             df_enhanced['BB_Squeeze'] = (df_enhanced['BB_Width'] < df_enhanced['BB_Width'].rolling(20).mean() * 0.8).astype(int)
+            # Keltner Channels (20 EMA, 10 ATR, multiplier 2)
+            df_enhanced = TechnicalIndicators.calculate_KeltnerChannels(df_enhanced, ema_period=20, atr_period=10, atr_mult=2)
+
+            # Chaikin Money Flow (20-period)
+            df_enhanced = TechnicalIndicators.calculate_CMF(df_enhanced, period=20)
+
 
         
         except Exception as e:
