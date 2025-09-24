@@ -426,10 +426,11 @@ def engineer_features_and_labels(df, horizon=20):
     df_labeled = label_with_atr_first_touch(df, horizon=horizon, atr_col="ATR_14")
     
     features = [
-        "RSI_14", "VOL_20", "NORM_ATR", "volume_ratio",
-        "darvas_high_normalized", "darvas_low_normalized", #"darvas_breakout_up",
-        "ema_9_21_diff", "ema_50_200_diff", "NORM_BB",#"BB_Squeeze",
-        #"KC_Pos","KC_Width",
+        "RSI_14","VOL_20", "NORM_ATR", "volume_ratio",
+        "darvas_high_normalized", #"darvas_breakout_up",
+        "ema_9_21_diff", "ema_50_200_diff","Normalized_JMA",
+        #"BB_Squeeze",
+        #"KC_Pos","KC_Width","NORM_BB","darvas_low_normalized",
         #"CMF",
     ]
     
@@ -848,7 +849,7 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
 if __name__ == "__main__":
     # config
     analysis_folder = "analysis_data/darvas_5"
-    prob_threshold = 0.1
+    prob_threshold = 0.35
     retrain_freq_days = 20
     train_window_days = 130
     val_window_days = 60

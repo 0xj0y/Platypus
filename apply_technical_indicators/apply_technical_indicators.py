@@ -303,6 +303,35 @@ class TechnicalIndicators:
 
         return df
 
+    @staticmethod
+    def calculate_normalized_jma(df, smooth_length=14, norm_period=30, column='close'):
+        """
+        Calculates the Normalized Jurik Moving Average (which is a Normalized EMA as per the script's logic).
+        
+        Args:
+            df (pd.DataFrame): DataFrame with price data.
+            smooth_length (int): The smoothing period for the EMA.
+            norm_period (int): The period for normalization (Z-score).
+            column (str): The price column to use.
+
+        Returns:
+            pd.Series: The normalized EMA values.
+        """
+        if len(df) < max(smooth_length, norm_period):
+            return pd.Series(np.nan, index=df.index)
+
+        # The Pine Script uses a standard EMA calculation
+        ema_values = TechnicalIndicators.calculate_EMA(df, period=smooth_length, column=column)
+        
+        # Calculate rolling average and standard deviation of the EMA
+        ema_average = ema_values.rolling(window=norm_period).mean()
+        ema_deviation = ema_values.rolling(window=norm_period).std()
+        
+        # Normalize using Z-score formula, handle division by zero
+        normalized_ema = (ema_values - ema_average) / ema_deviation.replace(0, np.nan)
+        
+        return normalized_ema
+
 
 
     
@@ -349,6 +378,7 @@ class TechnicalIndicators:
 
             # Chaikin Money Flow (20-period)
             df_enhanced = TechnicalIndicators.calculate_CMF(df_enhanced, period=20)
+            df_enhanced['Normalized_JMA'] = TechnicalIndicators.calculate_normalized_jma(df_enhanced, smooth_length=14, norm_period=30)
 
 
         
