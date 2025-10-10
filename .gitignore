@@ -156,3 +156,8 @@ cache/
 test_scripts/
 analysis_data/
 test.py
+1.md
+check_data_coverage.py
+forward_testing.py
+outdated_files.csv
+forward_portfolio/

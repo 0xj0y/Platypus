@@ -211,71 +211,168 @@ def create_sl_loss_report(trades_df, master_df=None):
 # -------------------------
 def create_win_report(trades_df, master_df=None):
     """
-    Winning trades report using ENTRY-DATE metrics.
+    Enhanced winning trades report that tracks target milestone achievements and profit attribution.
+    
     A 'winning trade' is defined as a trade (symbol, trade_id) whose total realized PnL across all SELL legs > 0.
-    For each winning trade, returns a single row anchored to the last SELL (exit) for reference,
-    but enriches RSI/ATR/volume/EMA metrics at the trade's ENTRY date (first BUY in that trade).
+    
+    This enhanced version:
+    1. Tracks which specific targets (T1, T2, T3) were hit
+    2. Calculates profit contribution from each exit stage  
+    3. Categorizes wins by exit type (T1-only, T2, T3, trailing, time-exit)
+    4. Provides entry-date metrics for analysis
+    5. FIXED: Handles TIMEEXIT, STOPLOSS, and all trailing scenarios
     """
+    
     td = trades_df.copy()
     td["date"] = pd.to_datetime(td["date"])
     td = td.sort_values(["symbol", "date"]).copy()
-
+    
     # Per-trade id via cumulative BUYs per symbol
     td["is_buy"] = (td["action"] == "BUY").astype(int)
     td["trade_id"] = td.groupby("symbol")["is_buy"].cumsum()
-
+    
     # SELL legs (must belong to an open trade_id)
     sells = td[(td["action"] == "SELL") & (td["trade_id"] > 0)].copy()
+    
     if sells.empty:
         print("No SELL legs found.")
         return pd.DataFrame(columns=[
-            "date","symbol","trade_id","entry_date","entry_price","shares",
-            "total_trade_pnl","RSI_14","VOL_20","NORM_ATR","volume_ratio",
-            "volume_percentile","ema_50_200_diff","ema_flag"
+            "date", "symbol", "trade_id", "entry_date", "entry_price", "total_shares",
+            "total_trade_pnl", "targets_hit", "exit_type", "t1_pnl", "t2_pnl", "t3_pnl", 
+            "trail_pnl", "time_exit_pnl", "final_exit_reason", "RSI_14", "VOL_20", "NORM_ATR", 
+            "volume_ratio", "volume_percentile", "ema_50_200_diff", "ema_flag"
         ])
-
+    
     sells["pnl"] = sells["pnl"].fillna(0.0)
-
-    # Net PnL per trade
-    pnl_per_trade = sells.groupby(["symbol","trade_id"], as_index=False)["pnl"].sum()
-    winners_keys = pnl_per_trade[pnl_per_trade["pnl"] > 0][["symbol","trade_id"]]
-
+    
+    # Net PnL per trade to identify winners
+    pnl_per_trade = sells.groupby(["symbol", "trade_id"], as_index=False)["pnl"].sum()
+    winners_keys = pnl_per_trade[pnl_per_trade["pnl"] > 0][["symbol", "trade_id"]]
+    
     if winners_keys.empty:
         print("No winning trades found.")
         return pd.DataFrame(columns=[
-            "date","symbol","trade_id","entry_date","entry_price","shares",
-            "total_trade_pnl","RSI_14","VOL_20","NORM_ATR","volume_ratio",
-            "volume_percentile","ema_50_200_diff","ema_flag"
+            "date", "symbol", "trade_id", "entry_date", "entry_price", "total_shares",
+            "total_trade_pnl", "targets_hit", "exit_type", "t1_pnl", "t2_pnl", "t3_pnl", 
+            "trail_pnl", "time_exit_pnl", "final_exit_reason", "RSI_14", "VOL_20", "NORM_ATR",
+            "volume_ratio", "volume_percentile", "ema_50_200_diff", "ema_flag"
         ])
-
-    # One row per winning trade: last SELL as representative
-    win_trades = sells.merge(winners_keys, on=["symbol","trade_id"], how="inner")
-    win_trades = (win_trades
-                  .sort_values(["symbol","trade_id","date"])
-                  .groupby(["symbol","trade_id"], as_index=False)
-                  .tail(1)
-                  .copy())
-
-    # Attach total_trade_pnl
-    win_trades = win_trades.merge(
-        pnl_per_trade.rename(columns={"pnl":"total_trade_pnl"}),
-        on=["symbol","trade_id"], how="left"
-    )
-
-    # Derive entry_date (first BUY in the trade)
-    buys = td[td["action"] == "BUY"][["symbol","trade_id","date","entry_price","shares"]].copy()
-    entry_per_trade = buys.groupby(["symbol","trade_id"], as_index=False)["date"].min().rename(columns={"date":"entry_date"})
-    win_trades = win_trades.merge(entry_per_trade, on=["symbol","trade_id"], how="left")
-
-    # Metrics at ENTRY date
+    
+    # Get all SELL legs for winning trades
+    win_sells = sells.merge(winners_keys, on=["symbol", "trade_id"], how="inner")
+    
+    # Analyze each winning trade for target achievements
+    enhanced_win_trades = []
+    
+    for (symbol, trade_id), trade_sells in win_sells.groupby(["symbol", "trade_id"]):
+        trade_sells = trade_sells.sort_values("date")
+        
+        # Initialize tracking variables
+        targets_hit = []
+        t1_pnl = t2_pnl = t3_pnl = trail_pnl = time_exit_pnl = 0.0
+        exit_type = "UNKNOWN"
+        final_exit_reason = trade_sells.iloc[-1]["reason"]
+        
+        # Analyze each SELL action to determine target achievements
+        for _, sell_row in trade_sells.iterrows():
+            reason = sell_row.get("reason", "")
+            pnl = sell_row["pnl"]
+            
+            if "T1_EXIT" in reason or "T1EXIT" in reason:
+                targets_hit.append("T1")
+                t1_pnl += pnl
+            elif "T2_EXIT" in reason or "T2EXIT" in reason:
+                targets_hit.append("T2")
+                t2_pnl += pnl
+            elif "T3_EXIT" in reason or "T3EXIT" in reason:
+                targets_hit.append("T3")
+                t3_pnl += pnl
+            elif any(x in reason for x in ["TRAIL", "TRAILING"]):
+                trail_pnl += pnl
+            elif "TIMEEXIT" in reason:
+                # Handle time-based exits (max hold days)
+                time_exit_pnl += pnl
+            elif "STOPLOSS" in reason:
+                # Handle stop losses that somehow ended positive (rare but possible)
+                trail_pnl += pnl  # Treat as final exit
+            elif "MAXHOLD" in reason:
+                time_exit_pnl += pnl  # Max hold exit
+            else:
+                # Handle any other exit types
+                trail_pnl += pnl
+        
+        # Determine exit type based on targets hit and exit patterns
+        unique_targets = list(set(targets_hit))
+        
+        if time_exit_pnl > 0 and not unique_targets:
+            # Pure time-based exit without hitting targets
+            exit_type = "TIME_EXIT_ONLY"
+        elif "T3" in unique_targets:
+            if trail_pnl > 0:
+                exit_type = "T3_WITH_TRAILING"
+            elif time_exit_pnl > 0:
+                exit_type = "T3_WITH_TIME_EXIT"
+            else:
+                exit_type = "T3_COMPLETE"
+        elif "T2" in unique_targets:
+            if time_exit_pnl > 0:
+                exit_type = "T2_WITH_TIME_EXIT"
+            else:
+                exit_type = "T2_PARTIAL"
+        elif "T1" in unique_targets:
+            if time_exit_pnl > 0:
+                exit_type = "T1_WITH_TIME_EXIT"  
+            else:
+                exit_type = "T1_ONLY"
+        elif trail_pnl > 0:
+            exit_type = "TRAILING_ONLY"
+        else:
+            exit_type = "OTHER"
+        
+        # Get trade summary info
+        total_trade_pnl = trade_sells["pnl"].sum()
+        last_sell = trade_sells.iloc[-1]
+        
+        enhanced_win_trades.append({
+            "date": last_sell["date"],  # Last exit date for reference
+            "symbol": symbol,
+            "trade_id": trade_id,
+            "total_trade_pnl": total_trade_pnl,
+            "targets_hit": ",".join(sorted(unique_targets)),
+            "exit_type": exit_type,
+            "t1_pnl": t1_pnl,
+            "t2_pnl": t2_pnl,
+            "t3_pnl": t3_pnl,
+            "trail_pnl": trail_pnl,
+            "time_exit_pnl": time_exit_pnl,  # NEW: Separate time-based exit profits
+            "final_exit_reason": final_exit_reason,
+            "total_shares": trade_sells["shares"].sum(),  # Total shares across all exits
+        })
+    
+    # Convert to DataFrame
+    win_trades_df = pd.DataFrame(enhanced_win_trades)
+    
+    # Get entry information (first BUY in each trade)
+    buys = td[td["action"] == "BUY"][["symbol", "trade_id", "date", "entry_price", "shares"]].copy()
+    entry_per_trade = buys.groupby(["symbol", "trade_id"], as_index=False).agg({
+        "date": "min",  # Entry date
+        "entry_price": "first",  # First entry price
+        "shares": "sum"  # Total shares bought
+    }).rename(columns={"date": "entry_date"})
+    
+    # Merge entry information
+    win_trades_df = win_trades_df.merge(entry_per_trade, on=["symbol", "trade_id"], how="left")
+    
+    # Add entry-date metrics from master_df
     if master_df is not None:
         m = master_df.copy()
         m["date"] = pd.to_datetime(m["date"])
-
+        
         def metrics_at_entry(row):
             df_sym = m[m["symbol"] == row["symbol"]]
             if df_sym.empty or pd.isna(row["entry_date"]):
-                return pd.Series([np.nan]*6)
+                return pd.Series([np.nan] * 8)
+            
             closest_row = df_sym.iloc[(df_sym["date"] - row["entry_date"]).abs().argmin()]
             return pd.Series([
                 closest_row.get("RSI_14", np.nan),
@@ -287,19 +384,16 @@ def create_win_report(trades_df, master_df=None):
                 closest_row.get("NORM_BB", np.nan),
                 closest_row.get("BB_Squeeze", np.nan),
             ])
-
-        win_trades[["RSI_14","VOL_20","NORM_ATR","volume_ratio",
-                    "volume_percentile","ema_50_200_diff","NORM_BB", "BB_Squeeze"]] = \
-            win_trades.apply(metrics_at_entry, axis=1)
+        
+        win_trades_df[["RSI_14", "VOL_20", "NORM_ATR", "volume_ratio",
+                       "volume_percentile", "ema_50_200_diff", "NORM_BB", "BB_Squeeze"]] = \
+            win_trades_df.apply(metrics_at_entry, axis=1)
     else:
-        win_trades["RSI_14"] = np.nan
-        win_trades["VOL_20"] = np.nan
-        win_trades["NORM_ATR"] = np.nan
-        win_trades["volume_ratio"] = np.nan
-        win_trades["volume_percentile"] = np.nan
-        win_trades["ema_50_200_diff"] = np.nan
-
-    # Add ema_flag (+1 if positive, -1 if negative, 0 if zero, NaN otherwise)
+        for col in ["RSI_14", "VOL_20", "NORM_ATR", "volume_ratio", 
+                   "volume_percentile", "ema_50_200_diff", "NORM_BB", "BB_Squeeze"]:
+            win_trades_df[col] = np.nan
+    
+    # Add ema_flag
     def flag_func(val):
         if pd.isna(val):
             return np.nan
@@ -309,17 +403,24 @@ def create_win_report(trades_df, master_df=None):
             return -1
         else:
             return 0
+    
+    win_trades_df["ema_flag"] = win_trades_df["ema_50_200_diff"].apply(flag_func)
+    
+    # Final column order (updated with new columns)
+    final_columns = [
+        "date", "symbol", "trade_id", "entry_date", "entry_price", "total_shares",
+        "total_trade_pnl", "targets_hit", "exit_type", "t1_pnl", "t2_pnl", "t3_pnl", 
+        "trail_pnl", "time_exit_pnl", "final_exit_reason", "RSI_14", "VOL_20", "NORM_ATR", 
+        "volume_ratio", "volume_percentile", "ema_50_200_diff", "ema_flag", "NORM_BB", "BB_Squeeze"
+    ]
+    
+    # Only include columns that exist
+    available_columns = [col for col in final_columns if col in win_trades_df.columns]
+    
+    return win_trades_df[available_columns].copy()
 
-    win_trades["ema_flag"] = win_trades["ema_50_200_diff"].apply(flag_func)
 
-    # Final report columns
-    report = win_trades[[
-        "date","symbol","trade_id","entry_date","entry_price","shares",
-        "total_trade_pnl","RSI_14","VOL_20","NORM_ATR","volume_ratio",
-        "volume_percentile","ema_50_200_diff","ema_flag","NORM_BB", "BB_Squeeze"
-    ]].copy()
 
-    return report
 
 # -------------------------
 # Entry report with date, featurs and prob
@@ -389,9 +490,9 @@ def create_entry_signals_report(trades_df, df, features):
     return entry_df
 
 
-# -------------------------
-# Data + Features
-# -------------------------
+
+# Data and Features
+
 def create_master_dataframe(folder_path, start_date_str="2019-01-01"):
     csv_files = glob.glob(os.path.join(folder_path, "*.csv"))
     csv_files = [f for f in csv_files if "master_with_indicators" not in os.path.basename(f)]
@@ -422,24 +523,27 @@ def engineer_features_and_labels(df, horizon=20):
     df["darvas_low_normalized"] = df["darvas_low"]/df["close"]
     df['KC_Pos'] = (df['close'] - df['KC_Lower']) / (df['KC_Upper'] - df['KC_Lower'])
     df['KC_Width'] = (df['KC_Upper'] - df['KC_Lower']) / df['KC_Mid'] 
-    
+
+    df['rolling_min'] = df.groupby('symbol')['close'].transform(lambda x: x.rolling(window=252, min_periods=50).min())
+    df['rolling_max'] = df.groupby('symbol')['close'].transform(lambda x: x.rolling(window=252, min_periods=50).max())
+
+    df['close_normalized'] = (df['close'] - df['rolling_min']) / (df['rolling_max'] - df['rolling_min'])
+
+    df['distance_from_high'] = 1 - df['close_normalized']  # 0 = at high, 1 = at low
     df_labeled = label_with_atr_first_touch(df, horizon=horizon, atr_col="ATR_14")
-    
+    print("Creating Features")    
     features = [
-        "RSI_14","VOL_20", "NORM_ATR", "volume_ratio",
-        "darvas_high_normalized", #"darvas_breakout_up",
-        "ema_9_21_diff", "ema_50_200_diff","Normalized_JMA",
-        #"BB_Squeeze",
-        #"KC_Pos","KC_Width","NORM_BB","darvas_low_normalized",
-        #"CMF",
+        "NORM_ATR", "volume_ratio","VOL_20",
+        "darvas_high_normalized",   
+        "ema_9_21_diff", "ema_50_200_diff",#'distance_from_high',#"darvas_low_normalized",
+        "Normalized_JMA",#"close_normalized",#'NORM_BB'
     ]
     
     df_labeled.dropna(subset=features + ["target"], inplace=True)
     return df_labeled, features
 
-# -------------------------
-# Backtest Runner with CatBoost
-# -------------------------
+#backtest function
+
 def run_backtest(folder,
                 start_date="2019-01-01",
                 initial_balance=100000,
@@ -501,12 +605,13 @@ def run_backtest(folder,
                 y_train = train_data["target"]
                 
                 model = CatBoostClassifier(
-                    iterations=200,
+                    iterations=800,
                     learning_rate=0.05,
                     depth=5,
                     subsample=0.8,
-                    colsample_bylevel=0.8,
+                    #colsample_bylevel=0.8,
                     random_seed=42,
+                    #l2_leaf_reg=3,
                     verbose=False
                 )
                 
@@ -575,7 +680,7 @@ def forward_pick(master_df,prob_threshold=0.35, max_positions=2,horizon=20):
     """
     model_path = "models/catboost_latest.cbm"
     if not os.path.exists(model_path):
-        print("No saved model ffound.")
+        print("No saved model found.")
     model = CatBoostClassifier()
     model.load_model(model_path)
     print(f"Model loaded from {model_path}")
@@ -598,7 +703,7 @@ def forward_pick(master_df,prob_threshold=0.35, max_positions=2,horizon=20):
             .sort_values("probability", ascending=False)
             .head(max_positions)[["symbol", "probability"]])
     
-    out_dir = "results"
+    out_dir = "results/forward_testing"
     os.makedirs(out_dir, exist_ok=True)
     picks_path = os.path.join(out_dir, f"forward_picks_{latest_date.date()}.csv")
     picks.to_csv(picks_path, index=False)
@@ -685,12 +790,13 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
         print("ℹ️  No stop-loss loss trades found for report")
 
     # ENHANCED: Winning Trades Report
-    print("📋 Generating Enhanced Winning Trades Report... (T1 Exit)")
+    print("📋 Generating Enhanced Target-Aware Winning Trades Report...")
     win_report = create_win_report(trades_df, master_df)
     
     if not win_report.empty:
         win_report.to_csv(os.path.join(out_dir, "win_trade_report.csv"), index=False)
-        print(f"✅ Win Report saved: {len(win_report)} winning trades found")
+        print(f"Enhanced Win Report saved: {len(win_report)} winning trades with target breakdown found")
+
         
         metrics_to_plot = ["RSI_14", "VOL_20", "NORM_ATR", "volume_ratio", "volume_percentile", "ema_50_200_diff","NORM_BB","BB_Squeeze"]
         
@@ -698,7 +804,7 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
             if not win_report[metric].isna().all():
                 plt.figure()
                 sns.histplot(win_report[metric].dropna(), bins=20, kde=True, color="green", alpha=0.7)
-                plt.title(f"{metric} Distribution for Winning Trades (T1 Hit)")
+                plt.title(f"{metric} Distribution for Winning Trades (All Target Types)")
                 plt.xlabel(f"{metric} at Entry")
                 plt.ylabel("Frequency")
                 plt.savefig(os.path.join(out_dir, f"win_trade_{metric.lower()}_distribution.png"))
@@ -849,7 +955,7 @@ def plot_and_report(trades_df, hist_df, training_df, model, explainer, features,
 if __name__ == "__main__":
     # config
     analysis_folder = "analysis_data/darvas_5"
-    prob_threshold = 0.35
+    prob_threshold = 0.2
     retrain_freq_days = 20
     train_window_days = 130
     val_window_days = 60
@@ -868,7 +974,7 @@ if __name__ == "__main__":
     activate_drawdown_scaling = False  # Set to False to disable drawdown controls
     
     # Position size tuning
-    position_scaling_increment = 40000000  # $400k growth → +1 position
+    position_scaling_increment = 5000000000  # $400k growth → +1 position
     max_positions_limit = 10             # Hard cap to prevent over-diversification
      
     if sys.argv[1] == "1":
